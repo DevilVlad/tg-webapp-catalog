@@ -1,0 +1,220 @@
+import os
+import json
+import logging
+import asyncio
+
+from dotenv import load_dotenv
+
+from aiogram import Bot, Dispatcher, F
+from aiogram.types import (
+    Message,
+    CallbackQuery,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
+    WebAppInfo,
+)
+from aiogram.filters import CommandStart, Command
+from aiogram.enums import ParseMode
+from aiogram.client.default import DefaultBotProperties
+
+# ----------------- Загрузка .env ----------------- #
+
+load_dotenv()
+
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+WEBAPP_URL = os.getenv("WEBAPP_URL")
+ORDER_CHAT_ID = os.getenv("ORDER_CHAT_ID")  # id чата для заказов (может быть пустым)
+
+if not BOT_TOKEN:
+    raise RuntimeError("Не указан BOT_TOKEN в .env")
+
+if not WEBAPP_URL:
+    raise RuntimeError("Не указан WEBAPP_URL в .env")
+
+# если ORDER_CHAT_ID указан — приводим к int, иначе None
+ORDER_CHAT_ID_INT = int(ORDER_CHAT_ID) if ORDER_CHAT_ID else None
+
+# ----------------- Логирование ----------------- #
+
+logging.basicConfig(level=logging.INFO)
+
+# ----------------- Инициализация бота ----------------- #
+
+bot = Bot(
+    token=BOT_TOKEN,
+    default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+)
+dp = Dispatcher()
+
+
+# ----------------- Хэндлеры ----------------- #
+
+@dp.message(CommandStart())
+async def cmd_start(message: Message):
+    """
+    /start — отправляем кнопку, которая открывает WebApp каталог
+    """
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="Открыть каталог 🛒",
+                    web_app=WebAppInfo(url=WEBAPP_URL),
+                )
+            ]
+        ]
+    )
+
+    await message.answer(
+        "Привет! Нажми кнопку, чтобы открыть каталог товаров 👇",
+        reply_markup=keyboard,
+    )
+
+
+@dp.message(Command("get_id"))
+async def cmd_get_id(message: Message):
+    """
+    Вспомогательная команда: /get_id — показывает ID текущего чата.
+    Удобно, чтобы узнать ORDER_CHAT_ID для .env.
+    """
+    chat_id = message.chat.id
+    await message.answer(f"ID этого чата: <code>{chat_id}</code>")
+
+
+@dp.callback_query(F.web_app_data)
+async def handle_webapp_data(callback_query: CallbackQuery):
+    """
+    Обработка данных, которые пришли из WebApp через tg.sendData(JSON)
+
+    Ожидаемый формат payload (из index.html):
+
+    {
+      "type": "cart_order",
+      "items": [
+        {
+          "code": "ip15-256b",
+          "category": "iPhone",
+          "model": "iPhone 15",
+          "color": "Blue",
+          "memory": "256",
+          "qty": 2,
+          "price": 109990,
+          "sum": 219980
+        },
+        ...
+      ],
+      "totalQty": 3,
+      "totalSum": 329970,
+      "currency": "RUB",
+      "createdAt": "2025-11-19T15:00:00.000Z"
+    }
+    """
+    raw_data = callback_query.web_app_data.data
+
+    try:
+        data = json.loads(raw_data)
+    except Exception:
+        logging.exception("Ошибка парсинга JSON из WebApp")
+        await callback_query.answer("Не получилось прочитать данные заказа 😔", show_alert=True)
+        return
+
+    if data.get("type") != "cart_order":
+        await callback_query.answer("Неизвестный формат данных 🤔", show_alert=True)
+        return
+
+    total_sum = data.get("totalSum", 0)
+    total_qty = data.get("totalQty", 0)
+    items = data.get("items", [])
+    currency = data.get("currency", "RUB")
+    created_at = data.get("createdAt")
+
+    user = callback_query.from_user
+    user_part = []
+    if user.full_name:
+        user_part.append(f"{user.full_name}")
+    if user.username:
+        user_part.append(f"@{user.username}")
+    user_line = " / ".join(user_part) if user_part else f"id {user.id}"
+
+    lines: list[str] = []
+
+    lines.append("<b>Новый заказ из WebApp</b> 🛒")
+    lines.append("")
+    lines.append(f"<b>Клиент:</b> {user_line}")
+    lines.append(f"<b>User ID:</b> <code>{user.id}</code>")
+    if created_at:
+        lines.append(f"<b>Создан:</b> <code>{created_at}</code>")
+    lines.append("")
+    lines.append(f"<b>Всего товаров:</b> {total_qty}")
+    lines.append(f"<b>Сумма:</b> {total_sum} {currency}")
+    lines.append("")
+
+    if not items:
+        lines.append("⚠ В заказе нет позиций (items пустой).")
+    else:
+        lines.append("<b>Позиции:</b>")
+        for idx, item in enumerate(items, start=1):
+            code = item.get("code") or "-"
+            category = item.get("category") or ""
+            model = item.get("model") or ""
+            color = item.get("color") or ""
+            memory = item.get("memory") or ""
+            qty = item.get("qty", 0)
+            price = item.get("price", 0)
+            sum_ = item.get("sum", 0)
+
+            # Строка заголовка товара
+            title_parts = []
+            if model:
+                title_parts.append(model)
+            if memory:
+                title_parts.append(f"{memory} GB")
+            if color:
+                title_parts.append(color)
+            title_str = " • ".join(title_parts) if title_parts else code
+
+            # Доп. инфа (категория + код)
+            meta_parts = []
+            if category:
+                meta_parts.append(category)
+            if code:
+                meta_parts.append(f"код: {code}")
+            meta_str = " | ".join(meta_parts)
+
+            lines.append(
+                f"{idx}) <b>{title_str}</b>"
+            )
+            if meta_str:
+                lines.append(f"   <i>{meta_str}</i>")
+
+            lines.append(
+                f"   {qty} шт × {price} {currency} = <b>{sum_} {currency}</b>"
+            )
+            lines.append("")
+
+    text = "\n".join(lines)
+
+    # --- Куда отправляем заказ ---
+    if ORDER_CHAT_ID_INT is not None:
+        # если указан ORDER_CHAT_ID в .env — всегда шлём туда
+        target_chat_id = ORDER_CHAT_ID_INT
+    else:
+        # иначе по умолчанию — в чат, откуда открыли WebApp
+        target_chat_id = (
+            callback_query.message.chat.id
+            if callback_query.message
+            else callback_query.from_user.id
+        )
+
+    await bot.send_message(target_chat_id, text)
+    await callback_query.answer("Заказ отправлен ✅", show_alert=False)
+
+
+# ----------------- Точка входа ----------------- #
+
+async def main():
+    await dp.start_polling(bot)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
