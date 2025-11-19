@@ -21,7 +21,7 @@
     }
 
     .app {
-      max-width: 800px;
+      max-width: 900px;
       margin: 0 auto;
     }
 
@@ -41,10 +41,12 @@
 
     .search {
       margin: 12px 0;
+      display: flex;
+      gap: 8px;
     }
 
     .search input {
-      width: 100%;
+      flex: 1;
       padding: 10px 12px;
       border-radius: 999px;
       border: none;
@@ -56,9 +58,9 @@
 
     .grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
       gap: 10px;
-      margin-bottom: 80px; /* место под корзину */
+      margin-bottom: 80px;
     }
 
     .card {
@@ -72,11 +74,13 @@
     }
 
     .card-img {
-      background: radial-gradient(circle at top, #444, #222);
       border-radius: 12px;
       padding-top: 60%;
       position: relative;
       overflow: hidden;
+      background: radial-gradient(circle at top, #444, #222);
+      background-size: cover;
+      background-position: center;
     }
 
     .card-img span {
@@ -87,6 +91,7 @@
       justify-content: center;
       font-size: 11px;
       opacity: 0.7;
+      backdrop-filter: blur(2px);
     }
 
     .card-title {
@@ -95,10 +100,37 @@
       line-height: 1.2;
     }
 
+    .card-subtitle {
+      font-size: 11px;
+      opacity: 0.8;
+    }
+
     .card-desc {
       font-size: 11px;
-      opacity: 0.75;
+      opacity: 0.7;
       line-height: 1.3;
+    }
+
+    .card-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      margin-top: 4px;
+    }
+
+    .badge {
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.09);
+      white-space: nowrap;
+    }
+
+    .badge-out {
+      background: rgba(255, 77, 77, 0.15);
+      border-color: rgba(255, 77, 77, 0.6);
+      color: #ff9b9b;
     }
 
     .card-bottom {
@@ -106,18 +138,18 @@
       align-items: center;
       justify-content: space-between;
       margin-top: 4px;
+      gap: 6px;
+    }
+
+    .price-wrap {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
     }
 
     .price {
       font-size: 14px;
       font-weight: 600;
-    }
-
-    .old-price {
-      font-size: 11px;
-      text-decoration: line-through;
-      opacity: 0.6;
-      margin-left: 4px;
     }
 
     .btn {
@@ -130,6 +162,7 @@
       background: var(--tg-theme-button-color, #2ea6ff);
       color: var(--tg-theme-button-text-color, #fff);
       transition: transform 0.08s ease, opacity 0.08s ease;
+      white-space: nowrap;
     }
 
     .btn:active {
@@ -137,10 +170,10 @@
       opacity: 0.85;
     }
 
-    .btn-ghost {
-      background: transparent;
-      border: 1px solid rgba(255,255,255,0.15);
-      color: inherit;
+    .btn[disabled] {
+      opacity: 0.4;
+      cursor: default;
+      background: #555;
     }
 
     .cart-bar {
@@ -201,6 +234,13 @@
       font-size: 13px;
     }
 
+    .loader {
+      margin-top: 40px;
+      text-align: center;
+      opacity: 0.8;
+      font-size: 13px;
+    }
+
     @media (max-width: 480px) {
       header h1 {
         font-size: 18px;
@@ -215,14 +255,15 @@
   <div class="app">
     <header>
       <h1>Каталог товаров</h1>
-      <p>Выберите позиции, а потом нажмите «Отправить заказ» внизу.</p>
+      <p>Данные берутся напрямую из Google Sheets по заданной структуре.</p>
     </header>
 
     <div class="search">
-      <input id="searchInput" type="search" placeholder="Поиск по названию..." />
+      <input id="searchInput" type="search" placeholder="Поиск по модели, цвету, памяти, коду..." />
     </div>
 
-    <div id="catalog" class="grid"></div>
+    <div id="loader" class="loader">Загружаем товары из Google Sheets…</div>
+    <div id="catalog" class="grid" style="display:none;"></div>
     <div id="emptyLabel" class="empty" style="display:none;">
       Ничего не найдено 🧐
     </div>
@@ -244,51 +285,30 @@
 
   <script>
     const tg = window.Telegram.WebApp || null;
-
     if (tg) {
       tg.expand();
       tg.enableClosingConfirmation();
       tg.MainButton.hide();
     }
 
-    // Пример каталога — потом подгрузишь с бэка или из API
-    const PRODUCTS = [
-      {
-        id: 'chair1',
-        title: 'Игровое кресло DXRacer Prince',
-        description: 'Эргономичное кресло для киберспорта и работы.',
-        price: 19990,
-        oldPrice: 22990
-      },
-      {
-        id: 'chair2',
-        title: 'Игровое кресло DXRacer Air',
-        description: 'Дышащая сетка, комфорт при длительных сессиях.',
-        price: 24990
-      },
-      {
-        id: 'mouse1',
-        title: 'Игровая мышь AYDA Pro',
-        description: 'Лёгкая, 8 кнопок, RGB.',
-        price: 3990
-      },
-      {
-        id: 'kb1',
-        title: 'Механическая клавиатура TKL',
-        description: 'Красные свитчи, подсветка, компактный формат.',
-        price: 6990,
-        oldPrice: 7490
-      },
-      {
-        id: 'headset1',
-        title: 'Геймерская гарнитура 7.1',
-        description: 'Объёмный звук и мягкие амбушюры.',
-        price: 5490
-      }
-    ];
+    // ⚙️ НАСТРОЙКИ GOOGLE SHEETS — ВСТАВЬ СВОЁ
+    const GOOGLE_SHEET_ID = "ВСТАВЬ_СЮДА_ID_ТАБЛИЦЫ"; // <= поменяй
+    const SHEET_NAME = "Catalog"; // имя листа
+
+    function buildSheetUrl() {
+      const base = `https://docs.google.com/spreadsheets/d/${GOOGLE_SHEET_ID}/gviz/tq`;
+      const params = new URLSearchParams({
+        tqx: "out:json",
+        sheet: SHEET_NAME,
+        rand: Date.now().toString(), // всегда свежие данные
+      });
+      return `${base}?${params.toString()}`;
+    }
+
+    let PRODUCTS = [];
 
     const state = {
-      cart: {} // id -> { product, qty }
+      cart: {} // code -> { product, qty }
     };
 
     const catalogEl = document.getElementById('catalog');
@@ -300,18 +320,125 @@
     const cartTotal = document.getElementById('cartTotal');
     const cartCount = document.getElementById('cartCount');
     const sendOrderBtn = document.getElementById('sendOrderBtn');
+    const loaderEl = document.getElementById('loader');
 
     function formatPrice(value) {
-      return value.toLocaleString('ru-RU') + ' ₽';
+      const num = Number(value) || 0;
+      return num.toLocaleString('ru-RU') + ' ₽';
+    }
+
+    function parseGoogleSheetJson(rawText) {
+      // Google возвращает /**/google.visualization.Query.setResponse({...});
+      const start = rawText.indexOf('{');
+      const end = rawText.lastIndexOf('}');
+      const jsonStr = rawText.slice(start, end + 1);
+      const obj = JSON.parse(jsonStr);
+      const rows = obj.table.rows || [];
+      const cols = obj.table.cols || [];
+
+      const colIndex = {};
+      cols.forEach((col, idx) => {
+        if (!col.label) return;
+        const key = col.label.trim().toLowerCase();
+        colIndex[key] = idx;
+      });
+
+      function getCell(row, label) {
+        const idx = colIndex[label.toLowerCase()];
+        if (idx === undefined) return null;
+        const cellObj = row.c[idx];
+        return cellObj ? cellObj.v : null;
+      }
+
+      const products = [];
+
+      for (const row of rows) {
+        const c = row.c || [];
+
+        const code = getCell(row, 'код товара');
+        const category = getCell(row, 'категория');
+        const model = getCell(row, 'вид товара');
+        const desc = getCell(row, 'описание товара');
+        const color = getCell(row, 'цвет');
+        const memory = getCell(row, 'память');
+        const priceVal = getCell(row, 'стоимость');
+        const stockVal = getCell(row, 'наличие');
+        const imageUrl = getCell(row, 'фото товара');
+
+        if (!code && !model) continue;
+
+        // наличие
+        let stock = 0;
+        if (typeof stockVal === 'number') {
+          stock = stockVal;
+        } else if (typeof stockVal === 'string') {
+          if (/нет/i.test(stockVal)) {
+            stock = 0;
+          } else {
+            stock = 1;
+          }
+        }
+        const isAvailable = stock > 0;
+
+        const product = {
+          code: String(code || '').trim(),
+          category: String(category || '').trim(),
+          model: String(model || '').trim(),
+          description: String(desc || '').trim(),
+          color: String(color || '').trim(),
+          memory: String(memory || '').trim(),
+          price: priceVal !== null && priceVal !== '' ? Number(priceVal) : 0,
+          stock,
+          isAvailable,
+          imageUrl: String(imageUrl || '').trim()
+        };
+
+        products.push(product);
+      }
+
+      return products;
+    }
+
+    async function loadProductsFromSheet() {
+      loaderEl.style.display = 'block';
+      catalogEl.style.display = 'none';
+      emptyLabel.style.display = 'none';
+
+      try {
+        const url = buildSheetUrl();
+        const res = await fetch(url, { cache: 'no-store' });
+        const text = await res.text();
+        PRODUCTS = parseGoogleSheetJson(text);
+      } catch (err) {
+        console.error('Ошибка загрузки Google Sheets:', err);
+        loaderEl.textContent = 'Ошибка загрузки товаров из Google Sheets 😔';
+        return;
+      }
+
+      loaderEl.style.display = 'none';
+      catalogEl.style.display = 'grid';
+
+      renderCatalog();
+    }
+
+    function productMatchesQuery(product, query) {
+      if (!query) return true;
+      const q = query.toLowerCase();
+      return (
+        product.model.toLowerCase().includes(q) ||
+        product.description.toLowerCase().includes(q) ||
+        product.color.toLowerCase().includes(q) ||
+        product.memory.toLowerCase().includes(q) ||
+        product.code.toLowerCase().includes(q) ||
+        product.category.toLowerCase().includes(q)
+      );
     }
 
     function renderCatalog() {
       const query = searchInput.value.toLowerCase().trim();
       catalogEl.innerHTML = '';
 
-      const filtered = PRODUCTS.filter(p =>
-        p.title.toLowerCase().includes(query)
-      );
+      const filtered = PRODUCTS.filter(p => productMatchesQuery(p, query));
 
       if (filtered.length === 0) {
         emptyLabel.style.display = 'block';
@@ -323,48 +450,92 @@
         const card = document.createElement('div');
         card.className = 'card';
 
+        // картинка
         const img = document.createElement('div');
         img.className = 'card-img';
-        img.innerHTML = '<span>Фото товара</span>';
 
+        if (product.imageUrl) {
+          img.style.backgroundImage = `url(${product.imageUrl})`;
+        } else {
+          const placeholder = document.createElement('span');
+          placeholder.textContent = 'Фото товара';
+          img.appendChild(placeholder);
+        }
+
+        // заголовок: модель или код
         const title = document.createElement('div');
         title.className = 'card-title';
-        title.textContent = product.title;
+        title.textContent = product.model || product.code;
 
-        const desc = document.createElement('div');
-        desc.className = 'card-desc';
-        desc.textContent = product.description;
+        // подзаголовок: цвет + память + код
+        const subtitle = document.createElement('div');
+        subtitle.className = 'card-subtitle';
+        const parts = [];
+        if (product.color) parts.push(product.color);
+        if (product.memory) parts.push(product.memory + ' GB');
+        if (product.code) parts.push('#' + product.code);
+        subtitle.textContent = parts.join(' • ');
 
+        card.appendChild(img);
+        card.appendChild(title);
+        card.appendChild(subtitle);
+
+        // описание
+        if (product.description) {
+          const desc = document.createElement('div');
+          desc.className = 'card-desc';
+          desc.textContent = product.description;
+          card.appendChild(desc);
+        }
+
+        // мета: категория + наличие
+        const meta = document.createElement('div');
+        meta.className = 'card-meta';
+
+        if (product.category) {
+          const b1 = document.createElement('span');
+          b1.className = 'badge';
+          b1.textContent = product.category;
+          meta.appendChild(b1);
+        }
+
+        const stockBadge = document.createElement('span');
+        stockBadge.className = 'badge';
+        if (!product.isAvailable) {
+          stockBadge.classList.add('badge-out');
+          stockBadge.textContent = 'Нет в наличии';
+        } else {
+          stockBadge.textContent = product.stock ? `В наличии: ${product.stock}` : 'В наличии';
+        }
+        meta.appendChild(stockBadge);
+
+        card.appendChild(meta);
+
+        // низ: цена + кнопка
         const bottom = document.createElement('div');
         bottom.className = 'card-bottom';
 
         const priceWrap = document.createElement('div');
+        priceWrap.className = 'price-wrap';
+
         const price = document.createElement('span');
         price.className = 'price';
         price.textContent = formatPrice(product.price);
         priceWrap.appendChild(price);
 
-        if (product.oldPrice) {
-          const old = document.createElement('span');
-          old.className = 'old-price';
-          old.textContent = formatPrice(product.oldPrice);
-          priceWrap.appendChild(old);
-        }
-
         const btn = document.createElement('button');
         btn.className = 'btn';
-        btn.textContent = 'В корзину';
+        btn.textContent = product.isAvailable ? 'В корзину' : 'Нет в наличии';
+        btn.disabled = !product.isAvailable;
 
         btn.addEventListener('click', () => {
+          if (!product.isAvailable) return;
           addToCart(product);
         });
 
         bottom.appendChild(priceWrap);
         bottom.appendChild(btn);
 
-        card.appendChild(img);
-        card.appendChild(title);
-        card.appendChild(desc);
         card.appendChild(bottom);
 
         catalogEl.appendChild(card);
@@ -372,11 +543,12 @@
     }
 
     function addToCart(product) {
-      const item = state.cart[product.id] || { product, qty: 0 };
+      const key = product.code || product.model;
+      const item = state.cart[key] || { product, qty: 0 };
       item.qty += 1;
-      state.cart[product.id] = item;
+      state.cart[key] = item;
       updateCartView();
-      if (tg) tg.HapticFeedback.impactOccurred('light');
+      if (tg && tg.HapticFeedback) tg.HapticFeedback.impactOccurred('light');
     }
 
     function calcCartTotals() {
@@ -414,8 +586,11 @@
 
     function buildOrderPayload() {
       const items = Object.values(state.cart).map(item => ({
-        id: item.product.id,
-        title: item.product.title,
+        code: item.product.code,
+        category: item.product.category,
+        model: item.product.model,
+        color: item.product.color,
+        memory: item.product.memory,
         qty: item.qty,
         price: item.product.price,
         sum: item.qty * item.product.price
@@ -438,7 +613,7 @@
       const json = JSON.stringify(payload);
 
       if (tg) {
-        tg.sendData(json); // прилетит в бота в callback_query.data (web_app_data)
+        tg.sendData(json);
         tg.close();
       } else {
         alert('TG WebApp SDK недоступен. Заказ: ' + json);
@@ -452,7 +627,8 @@
       tg.onEvent('mainButtonClicked', sendOrder);
     }
 
-    renderCatalog();
+    // Загружаем всегда свежие данные при открытии
+    loadProductsFromSheet();
   </script>
 </body>
 </html>
