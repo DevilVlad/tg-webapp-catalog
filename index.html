@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <title>Каталог товаров</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- Telegram WebApp JS -->
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    body {
+      background: var(--tg-theme-bg-color, #111);
+      color: var(--tg-theme-text-color, #fff);
+      padding: 12px;
+    }
+
+    .app {
+      max-width: 800px;
+      margin: 0 auto;
+    }
+
+    header {
+      margin-bottom: 12px;
+    }
+
+    header h1 {
+      font-size: 20px;
+      margin-bottom: 4px;
+    }
+
+    header p {
+      font-size: 13px;
+      opacity: 0.8;
+    }
+
+    .search {
+      margin: 12px 0;
+    }
+
+    .search input {
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 999px;
+      border: none;
+      outline: none;
+      background: var(--tg-theme-secondary-bg-color, #1d1d1d);
+      color: inherit;
+      font-size: 14px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      gap: 10px;
+      margin-bottom: 80px; /* место под корзину */
+    }
+
+    .card {
+      background: var(--tg-theme-secondary-bg-color, #151515);
+      border-radius: 16px;
+      padding: 10px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .card-img {
+      background: radial-gradient(circle at top, #444, #222);
+      border-radius: 12px;
+      padding-top: 60%;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .card-img span {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      opacity: 0.7;
+    }
+
+    .card-title {
+      font-size: 14px;
+      font-weight: 600;
+      line-height: 1.2;
+    }
+
+    .card-desc {
+      font-size: 11px;
+      opacity: 0.75;
+      line-height: 1.3;
+    }
+
+    .card-bottom {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 4px;
+    }
+
+    .price {
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .old-price {
+      font-size: 11px;
+      text-decoration: line-through;
+      opacity: 0.6;
+      margin-left: 4px;
+    }
+
+    .btn {
+      border: none;
+      border-radius: 999px;
+      padding: 7px 10px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      background: var(--tg-theme-button-color, #2ea6ff);
+      color: var(--tg-theme-button-text-color, #fff);
+      transition: transform 0.08s ease, opacity 0.08s ease;
+    }
+
+    .btn:active {
+      transform: scale(0.97);
+      opacity: 0.85;
+    }
+
+    .btn-ghost {
+      background: transparent;
+      border: 1px solid rgba(255,255,255,0.15);
+      color: inherit;
+    }
+
+    .cart-bar {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      padding: 10px 12px 14px;
+      background: color-mix(in srgb, var(--tg-theme-secondary-bg-color, #151515) 94%, #000 6%);
+      box-shadow: 0 -4px 16px rgba(0,0,0,0.35);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      z-index: 10;
+    }
+
+    .cart-info {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .cart-line1 {
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .cart-line2 {
+      font-size: 11px;
+      opacity: 0.8;
+    }
+
+    .cart-actions {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+    }
+
+    .chip {
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.08);
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .chip span {
+      opacity: 0.7;
+    }
+
+    .empty {
+      margin-top: 40px;
+      text-align: center;
+      opacity: 0.6;
+      font-size: 13px;
+    }
+
+    @media (max-width: 480px) {
+      header h1 {
+        font-size: 18px;
+      }
+      .grid {
+        gap: 8px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <h1>Каталог товаров</h1>
+      <p>Выберите позиции, а потом нажмите «Отправить заказ» внизу.</p>
+    </header>
+
+    <div class="search">
+      <input id="searchInput" type="search" placeholder="Поиск по названию..." />
+    </div>
+
+    <div id="catalog" class="grid"></div>
+    <div id="emptyLabel" class="empty" style="display:none;">
+      Ничего не найдено 🧐
+    </div>
+  </div>
+
+  <div class="cart-bar" id="cartBar" style="display:none;">
+    <div class="cart-info">
+      <div class="cart-line1" id="cartTitle">Корзина пуста</div>
+      <div class="cart-line2" id="cartSubtitle">Добавьте товары в корзину</div>
+    </div>
+    <div class="cart-actions">
+      <div class="chip">
+        <strong id="cartTotal">0 ₽</strong>
+        <span id="cartCount">(0 шт.)</span>
+      </div>
+      <button class="btn" id="sendOrderBtn">Отправить</button>
+    </div>
+  </div>
+
+  <script>
+    const tg = window.Telegram.WebApp || null;
+
+    if (tg) {
+      tg.expand();
+      tg.enableClosingConfirmation();
+      tg.MainButton.hide();
+    }
+
+    // Пример каталога — потом подгрузишь с бэка или из API
+    const PRODUCTS = [
+      {
+        id: 'chair1',
+        title: 'Игровое кресло DXRacer Prince',
+        description: 'Эргономичное кресло для киберспорта и работы.',
+        price: 19990,
+        oldPrice: 22990
+      },
+      {
+        id: 'chair2',
+        title: 'Игровое кресло DXRacer Air',
+        description: 'Дышащая сетка, комфорт при длительных сессиях.',
+        price: 24990
+      },
+      {
+        id: 'mouse1',
+        title: 'Игровая мышь AYDA Pro',
+        description: 'Лёгкая, 8 кнопок, RGB.',
+        price: 3990
+      },
+      {
+        id: 'kb1',
+        title: 'Механическая клавиатура TKL',
+        description: 'Красные свитчи, подсветка, компактный формат.',
+        price: 6990,
+        oldPrice: 7490
+      },
+      {
+        id: 'headset1',
+        title: 'Геймерская гарнитура 7.1',
+        description: 'Объёмный звук и мягкие амбушюры.',
+        price: 5490
+      }
+    ];
+
+    const state = {
+      cart: {} // id -> { product, qty }
+    };
+
+    const catalogEl = document.getElementById('catalog');
+    const searchInput = document.getElementById('searchInput');
+    const emptyLabel = document.getElementById('emptyLabel');
+    const cartBar = document.getElementById('cartBar');
+    const cartTitle = document.getElementById('cartTitle');
+    const cartSubtitle = document.getElementById('cartSubtitle');
+    const cartTotal = document.getElementById('cartTotal');
+    const cartCount = document.getElementById('cartCount');
+    const sendOrderBtn = document.getElementById('sendOrderBtn');
+
+    function formatPrice(value) {
+      return value.toLocaleString('ru-RU') + ' ₽';
+    }
+
+    function renderCatalog() {
+      const query = searchInput.value.toLowerCase().trim();
+      catalogEl.innerHTML = '';
+
+      const filtered = PRODUCTS.filter(p =>
+        p.title.toLowerCase().includes(query)
+      );
+
+      if (filtered.length === 0) {
+        emptyLabel.style.display = 'block';
+      } else {
+        emptyLabel.style.display = 'none';
+      }
+
+      filtered.forEach(product => {
+        const card = document.createElement('div');
+        card.className = 'card';
+
+        const img = document.createElement('div');
+        img.className = 'card-img';
+        img.innerHTML = '<span>Фото товара</span>';
+
+        const title = document.createElement('div');
+        title.className = 'card-title';
+        title.textContent = product.title;
+
+        const desc = document.createElement('div');
+        desc.className = 'card-desc';
+        desc.textContent = product.description;
+
+        const bottom = document.createElement('div');
+        bottom.className = 'card-bottom';
+
+        const priceWrap = document.createElement('div');
+        const price = document.createElement('span');
+        price.className = 'price';
+        price.textContent = formatPrice(product.price);
+        priceWrap.appendChild(price);
+
+        if (product.oldPrice) {
+          const old = document.createElement('span');
+          old.className = 'old-price';
+          old.textContent = formatPrice(product.oldPrice);
+          priceWrap.appendChild(old);
+        }
+
+        const btn = document.createElement('button');
+        btn.className = 'btn';
+        btn.textContent = 'В корзину';
+
+        btn.addEventListener('click', () => {
+          addToCart(product);
+        });
+
+        bottom.appendChild(priceWrap);
+        bottom.appendChild(btn);
+
+        card.appendChild(img);
+        card.appendChild(title);
+        card.appendChild(desc);
+        card.appendChild(bottom);
+
+        catalogEl.appendChild(card);
+      });
+    }
+
+    function addToCart(product) {
+      const item = state.cart[product.id] || { product, qty: 0 };
+      item.qty += 1;
+      state.cart[product.id] = item;
+      updateCartView();
+      if (tg) tg.HapticFeedback.impactOccurred('light');
+    }
+
+    function calcCartTotals() {
+      let totalQty = 0;
+      let totalSum = 0;
+
+      Object.values(state.cart).forEach(item => {
+        totalQty += item.qty;
+        totalSum += item.qty * item.product.price;
+      });
+
+      return { totalQty, totalSum };
+    }
+
+    function updateCartView() {
+      const { totalQty, totalSum } = calcCartTotals();
+
+      if (totalQty === 0) {
+        cartBar.style.display = 'none';
+        if (tg) tg.MainButton.hide();
+        return;
+      }
+
+      cartBar.style.display = 'flex';
+      cartTitle.textContent = `В корзине: ${totalQty} шт.`;
+      cartSubtitle.textContent = 'Проверьте состав заказа и отправьте его в чат.';
+      cartTotal.textContent = formatPrice(totalSum);
+      cartCount.textContent = `(${totalQty} шт.)`;
+
+      if (tg) {
+        tg.MainButton.setText('Отправить заказ');
+        tg.MainButton.show();
+      }
+    }
+
+    function buildOrderPayload() {
+      const items = Object.values(state.cart).map(item => ({
+        id: item.product.id,
+        title: item.product.title,
+        qty: item.qty,
+        price: item.product.price,
+        sum: item.qty * item.product.price
+      }));
+
+      const { totalQty, totalSum } = calcCartTotals();
+
+      return {
+        type: 'cart_order',
+        items,
+        totalQty,
+        totalSum,
+        currency: 'RUB',
+        createdAt: new Date().toISOString()
+      };
+    }
+
+    function sendOrder() {
+      const payload = buildOrderPayload();
+      const json = JSON.stringify(payload);
+
+      if (tg) {
+        tg.sendData(json); // прилетит в бота в callback_query.data (web_app_data)
+        tg.close();
+      } else {
+        alert('TG WebApp SDK недоступен. Заказ: ' + json);
+      }
+    }
+
+    searchInput.addEventListener('input', renderCatalog);
+    sendOrderBtn.addEventListener('click', sendOrder);
+
+    if (tg) {
+      tg.onEvent('mainButtonClicked', sendOrder);
+    }
+
+    renderCatalog();
+  </script>
+</body>
+</html>
