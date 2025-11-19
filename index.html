@@ -1,220 +1,634 @@
-import os
-import json
-import logging
-import asyncio
-
-from dotenv import load_dotenv
-
-from aiogram import Bot, Dispatcher, F
-from aiogram.types import (
-    Message,
-    CallbackQuery,
-    InlineKeyboardMarkup,
-    InlineKeyboardButton,
-    WebAppInfo,
-)
-from aiogram.filters import CommandStart, Command
-from aiogram.enums import ParseMode
-from aiogram.client.default import DefaultBotProperties
-
-# ----------------- Загрузка .env ----------------- #
-
-load_dotenv()
-
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-WEBAPP_URL = os.getenv("WEBAPP_URL")
-ORDER_CHAT_ID = os.getenv("ORDER_CHAT_ID")  # id чата для заказов (может быть пустым)
-
-if not BOT_TOKEN:
-    raise RuntimeError("Не указан BOT_TOKEN в .env")
-
-if not WEBAPP_URL:
-    raise RuntimeError("Не указан WEBAPP_URL в .env")
-
-# если ORDER_CHAT_ID указан — приводим к int, иначе None
-ORDER_CHAT_ID_INT = int(ORDER_CHAT_ID) if ORDER_CHAT_ID else None
-
-# ----------------- Логирование ----------------- #
-
-logging.basicConfig(level=logging.INFO)
-
-# ----------------- Инициализация бота ----------------- #
-
-bot = Bot(
-    token=BOT_TOKEN,
-    default=DefaultBotProperties(parse_mode=ParseMode.HTML)
-)
-dp = Dispatcher()
-
-
-# ----------------- Хэндлеры ----------------- #
-
-@dp.message(CommandStart())
-async def cmd_start(message: Message):
-    """
-    /start — отправляем кнопку, которая открывает WebApp каталог
-    """
-    keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="Открыть каталог 🛒",
-                    web_app=WebAppInfo(url=WEBAPP_URL),
-                )
-            ]
-        ]
-    )
-
-    await message.answer(
-        "Привет! Нажми кнопку, чтобы открыть каталог товаров 👇",
-        reply_markup=keyboard,
-    )
-
-
-@dp.message(Command("get_id"))
-async def cmd_get_id(message: Message):
-    """
-    Вспомогательная команда: /get_id — показывает ID текущего чата.
-    Удобно, чтобы узнать ORDER_CHAT_ID для .env.
-    """
-    chat_id = message.chat.id
-    await message.answer(f"ID этого чата: <code>{chat_id}</code>")
-
-
-@dp.callback_query(F.web_app_data)
-async def handle_webapp_data(callback_query: CallbackQuery):
-    """
-    Обработка данных, которые пришли из WebApp через tg.sendData(JSON)
-
-    Ожидаемый формат payload (из index.html):
-
-    {
-      "type": "cart_order",
-      "items": [
-        {
-          "code": "ip15-256b",
-          "category": "iPhone",
-          "model": "iPhone 15",
-          "color": "Blue",
-          "memory": "256",
-          "qty": 2,
-          "price": 109990,
-          "sum": 219980
-        },
-        ...
-      ],
-      "totalQty": 3,
-      "totalSum": 329970,
-      "currency": "RUB",
-      "createdAt": "2025-11-19T15:00:00.000Z"
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <title>Каталог товаров</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- Telegram WebApp JS -->
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
-    """
-    raw_data = callback_query.web_app_data.data
 
-    try:
-        data = json.loads(raw_data)
-    except Exception:
-        logging.exception("Ошибка парсинга JSON из WebApp")
-        await callback_query.answer("Не получилось прочитать данные заказа 😔", show_alert=True)
-        return
+    body {
+      background: var(--tg-theme-bg-color, #111);
+      color: var(--tg-theme-text-color, #fff);
+      padding: 12px;
+    }
 
-    if data.get("type") != "cart_order":
-        await callback_query.answer("Неизвестный формат данных 🤔", show_alert=True)
-        return
+    .app {
+      max-width: 900px;
+      margin: 0 auto;
+    }
 
-    total_sum = data.get("totalSum", 0)
-    total_qty = data.get("totalQty", 0)
-    items = data.get("items", [])
-    currency = data.get("currency", "RUB")
-    created_at = data.get("createdAt")
+    header {
+      margin-bottom: 12px;
+    }
 
-    user = callback_query.from_user
-    user_part = []
-    if user.full_name:
-        user_part.append(f"{user.full_name}")
-    if user.username:
-        user_part.append(f"@{user.username}")
-    user_line = " / ".join(user_part) if user_part else f"id {user.id}"
+    header h1 {
+      font-size: 20px;
+      margin-bottom: 4px;
+    }
 
-    lines: list[str] = []
+    header p {
+      font-size: 13px;
+      opacity: 0.8;
+    }
 
-    lines.append("<b>Новый заказ из WebApp</b> 🛒")
-    lines.append("")
-    lines.append(f"<b>Клиент:</b> {user_line}")
-    lines.append(f"<b>User ID:</b> <code>{user.id}</code>")
-    if created_at:
-        lines.append(f"<b>Создан:</b> <code>{created_at}</code>")
-    lines.append("")
-    lines.append(f"<b>Всего товаров:</b> {total_qty}")
-    lines.append(f"<b>Сумма:</b> {total_sum} {currency}")
-    lines.append("")
+    .search {
+      margin: 12px 0;
+      display: flex;
+      gap: 8px;
+    }
 
-    if not items:
-        lines.append("⚠ В заказе нет позиций (items пустой).")
-    else:
-        lines.append("<b>Позиции:</b>")
-        for idx, item in enumerate(items, start=1):
-            code = item.get("code") or "-"
-            category = item.get("category") or ""
-            model = item.get("model") or ""
-            color = item.get("color") or ""
-            memory = item.get("memory") or ""
-            qty = item.get("qty", 0)
-            price = item.get("price", 0)
-            sum_ = item.get("sum", 0)
+    .search input {
+      flex: 1;
+      padding: 10px 12px;
+      border-radius: 999px;
+      border: none;
+      outline: none;
+      background: var(--tg-theme-secondary-bg-color, #1d1d1d);
+      color: inherit;
+      font-size: 14px;
+    }
 
-            # Строка заголовка товара
-            title_parts = []
-            if model:
-                title_parts.append(model)
-            if memory:
-                title_parts.append(f"{memory} GB")
-            if color:
-                title_parts.append(color)
-            title_str = " • ".join(title_parts) if title_parts else code
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 10px;
+      margin-bottom: 80px;
+    }
 
-            # Доп. инфа (категория + код)
-            meta_parts = []
-            if category:
-                meta_parts.append(category)
-            if code:
-                meta_parts.append(f"код: {code}")
-            meta_str = " | ".join(meta_parts)
+    .card {
+      background: var(--tg-theme-secondary-bg-color, #151515);
+      border-radius: 16px;
+      padding: 10px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
 
-            lines.append(
-                f"{idx}) <b>{title_str}</b>"
-            )
-            if meta_str:
-                lines.append(f"   <i>{meta_str}</i>")
+    .card-img {
+      border-radius: 12px;
+      padding-top: 60%;
+      position: relative;
+      overflow: hidden;
+      background: radial-gradient(circle at top, #444, #222);
+      background-size: cover;
+      background-position: center;
+    }
 
-            lines.append(
-                f"   {qty} шт × {price} {currency} = <b>{sum_} {currency}</b>"
-            )
-            lines.append("")
+    .card-img span {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      opacity: 0.7;
+      backdrop-filter: blur(2px);
+    }
 
-    text = "\n".join(lines)
+    .card-title {
+      font-size: 14px;
+      font-weight: 600;
+      line-height: 1.2;
+    }
 
-    # --- Куда отправляем заказ ---
-    if ORDER_CHAT_ID_INT is not None:
-        # если указан ORDER_CHAT_ID в .env — всегда шлём туда
-        target_chat_id = ORDER_CHAT_ID_INT
-    else:
-        # иначе по умолчанию — в чат, откуда открыли WebApp
-        target_chat_id = (
-            callback_query.message.chat.id
-            if callback_query.message
-            else callback_query.from_user.id
-        )
+    .card-subtitle {
+      font-size: 11px;
+      opacity: 0.8;
+    }
 
-    await bot.send_message(target_chat_id, text)
-    await callback_query.answer("Заказ отправлен ✅", show_alert=False)
+    .card-desc {
+      font-size: 11px;
+      opacity: 0.7;
+      line-height: 1.3;
+    }
 
+    .card-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      margin-top: 4px;
+    }
 
-# ----------------- Точка входа ----------------- #
+    .badge {
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.09);
+      white-space: nowrap;
+    }
 
-async def main():
-    await dp.start_polling(bot)
+    .badge-out {
+      background: rgba(255, 77, 77, 0.15);
+      border-color: rgba(255, 77, 77, 0.6);
+      color: #ff9b9b;
+    }
 
+    .card-bottom {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 4px;
+      gap: 6px;
+    }
 
-if __name__ == "__main__":
-    asyncio.run(main())
+    .price-wrap {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .price {
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .btn {
+      border: none;
+      border-radius: 999px;
+      padding: 7px 10px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      background: var(--tg-theme-button-color, #2ea6ff);
+      color: var(--tg-theme-button-text-color, #fff);
+      transition: transform 0.08s ease, opacity 0.08s ease;
+      white-space: nowrap;
+    }
+
+    .btn:active {
+      transform: scale(0.97);
+      opacity: 0.85;
+    }
+
+    .btn[disabled] {
+      opacity: 0.4;
+      cursor: default;
+      background: #555;
+    }
+
+    .cart-bar {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      padding: 10px 12px 14px;
+      background: color-mix(in srgb, var(--tg-theme-secondary-bg-color, #151515) 94%, #000 6%);
+      box-shadow: 0 -4px 16px rgba(0,0,0,0.35);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      z-index: 10;
+    }
+
+    .cart-info {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .cart-line1 {
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .cart-line2 {
+      font-size: 11px;
+      opacity: 0.8;
+    }
+
+    .cart-actions {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+    }
+
+    .chip {
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.08);
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .chip span {
+      opacity: 0.7;
+    }
+
+    .empty {
+      margin-top: 40px;
+      text-align: center;
+      opacity: 0.6;
+      font-size: 13px;
+    }
+
+    .loader {
+      margin-top: 40px;
+      text-align: center;
+      opacity: 0.8;
+      font-size: 13px;
+    }
+
+    @media (max-width: 480px) {
+      header h1 {
+        font-size: 18px;
+      }
+      .grid {
+        gap: 8px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <h1>Каталог товаров</h1>
+      <p>Данные берутся напрямую из Google Sheets по заданной структуре.</p>
+    </header>
+
+    <div class="search">
+      <input id="searchInput" type="search" placeholder="Поиск по модели, цвету, памяти, коду..." />
+    </div>
+
+    <div id="loader" class="loader">Загружаем товары из Google Sheets…</div>
+    <div id="catalog" class="grid" style="display:none;"></div>
+    <div id="emptyLabel" class="empty" style="display:none;">
+      Ничего не найдено 🧐
+    </div>
+  </div>
+
+  <div class="cart-bar" id="cartBar" style="display:none;">
+    <div class="cart-info">
+      <div class="cart-line1" id="cartTitle">Корзина пуста</div>
+      <div class="cart-line2" id="cartSubtitle">Добавьте товары в корзину</div>
+    </div>
+    <div class="cart-actions">
+      <div class="chip">
+        <strong id="cartTotal">0 ₽</strong>
+        <span id="cartCount">(0 шт.)</span>
+      </div>
+      <button class="btn" id="sendOrderBtn">Отправить</button>
+    </div>
+  </div>
+
+  <script>
+    const tg = window.Telegram.WebApp || null;
+    if (tg) {
+      tg.expand();
+      tg.enableClosingConfirmation();
+      tg.MainButton.hide();
+    }
+
+    // ⚙️ НАСТРОЙКИ GOOGLE SHEETS — ВСТАВЬ СВОЁ
+    const GOOGLE_SHEET_ID = "ВСТАВЬ_СЮДА_ID_ТАБЛИЦЫ"; // <= сюда ID таблицы
+    const SHEET_NAME = "Catalog"; // имя листа
+
+    function buildSheetUrl() {
+      const base = `https://docs.google.com/spreadsheets/d/${GOOGLE_SHEET_ID}/gviz/tq`;
+      const params = new URLSearchParams({
+        tqx: "out:json",
+        sheet: SHEET_NAME,
+        rand: Date.now().toString(), // всегда свежие данные
+      });
+      return `${base}?${params.toString()}`;
+    }
+
+    let PRODUCTS = [];
+
+    const state = {
+      cart: {} // code -> { product, qty }
+    };
+
+    const catalogEl = document.getElementById('catalog');
+    const searchInput = document.getElementById('searchInput');
+    const emptyLabel = document.getElementById('emptyLabel');
+    const cartBar = document.getElementById('cartBar');
+    const cartTitle = document.getElementById('cartTitle');
+    const cartSubtitle = document.getElementById('cartSubtitle');
+    const cartTotal = document.getElementById('cartTotal');
+    const cartCount = document.getElementById('cartCount');
+    const sendOrderBtn = document.getElementById('sendOrderBtn');
+    const loaderEl = document.getElementById('loader');
+
+    function formatPrice(value) {
+      const num = Number(value) || 0;
+      return num.toLocaleString('ru-RU') + ' ₽';
+    }
+
+    function parseGoogleSheetJson(rawText) {
+      // Google возвращает /**/google.visualization.Query.setResponse({...});
+      const start = rawText.indexOf('{');
+      const end = rawText.lastIndexOf('}');
+      const jsonStr = rawText.slice(start, end + 1);
+      const obj = JSON.parse(jsonStr);
+      const rows = obj.table.rows || [];
+      const cols = obj.table.cols || [];
+
+      const colIndex = {};
+      cols.forEach((col, idx) => {
+        if (!col.label) return;
+        const key = col.label.trim().toLowerCase();
+        colIndex[key] = idx;
+      });
+
+      function getCell(row, label) {
+        const idx = colIndex[label.toLowerCase()];
+        if (idx === undefined) return null;
+        const cellObj = row.c[idx];
+        return cellObj ? cellObj.v : null;
+      }
+
+      const products = [];
+
+      for (const row of rows) {
+        const c = row.c || [];
+
+        const code = getCell(row, 'код товара');
+        const category = getCell(row, 'категория');
+        const model = getCell(row, 'вид товара');
+        const desc = getCell(row, 'описание товара');
+        const color = getCell(row, 'цвет');
+        const memory = getCell(row, 'память');
+        const priceVal = getCell(row, 'стоимость');
+        const stockVal = getCell(row, 'наличие');
+        const imageUrl = getCell(row, 'фото товара');
+
+        if (!code && !model) continue;
+
+        // наличие
+        let stock = 0;
+        if (typeof stockVal === 'number') {
+          stock = stockVal;
+        } else if (typeof stockVal === 'string') {
+          if (/нет/i.test(stockVal)) {
+            stock = 0;
+          } else {
+            stock = 1;
+          }
+        }
+        const isAvailable = stock > 0;
+
+        const product = {
+          code: String(code || '').trim(),
+          category: String(category || '').trim(),
+          model: String(model || '').trim(),
+          description: String(desc || '').trim(),
+          color: String(color || '').trim(),
+          memory: String(memory || '').trim(),
+          price: priceVal !== null && priceVal !== '' ? Number(priceVal) : 0,
+          stock,
+          isAvailable,
+          imageUrl: String(imageUrl || '').trim()
+        };
+
+        products.push(product);
+      }
+
+      return products;
+    }
+
+    async function loadProductsFromSheet() {
+      loaderEl.style.display = 'block';
+      catalogEl.style.display = 'none';
+      emptyLabel.style.display = 'none';
+
+      try {
+        const url = buildSheetUrl();
+        const res = await fetch(url, { cache: 'no-store' });
+        const text = await res.text();
+        PRODUCTS = parseGoogleSheetJson(text);
+      } catch (err) {
+        console.error('Ошибка загрузки Google Sheets:', err);
+        loaderEl.textContent = 'Ошибка загрузки товаров из Google Sheets 😔';
+        return;
+      }
+
+      loaderEl.style.display = 'none';
+      catalogEl.style.display = 'grid';
+
+      renderCatalog();
+    }
+
+    function productMatchesQuery(product, query) {
+      if (!query) return true;
+      const q = query.toLowerCase();
+      return (
+        product.model.toLowerCase().includes(q) ||
+        product.description.toLowerCase().includes(q) ||
+        product.color.toLowerCase().includes(q) ||
+        product.memory.toLowerCase().includes(q) ||
+        product.code.toLowerCase().includes(q) ||
+        product.category.toLowerCase().includes(q)
+      );
+    }
+
+    function renderCatalog() {
+      const query = searchInput.value.toLowerCase().trim();
+      catalogEl.innerHTML = '';
+
+      const filtered = PRODUCTS.filter(p => productMatchesQuery(p, query));
+
+      if (filtered.length === 0) {
+        emptyLabel.style.display = 'block';
+      } else {
+        emptyLabel.style.display = 'none';
+      }
+
+      filtered.forEach(product => {
+        const card = document.createElement('div');
+        card.className = 'card';
+
+        // картинка
+        const img = document.createElement('div');
+        img.className = 'card-img';
+
+        if (product.imageUrl) {
+          img.style.backgroundImage = `url(${product.imageUrl})`;
+        } else {
+          const placeholder = document.createElement('span');
+          placeholder.textContent = 'Фото товара';
+          img.appendChild(placeholder);
+        }
+
+        // заголовок: модель или код
+        const title = document.createElement('div');
+        title.className = 'card-title';
+        title.textContent = product.model || product.code;
+
+        // подзаголовок: цвет + память + код
+        const subtitle = document.createElement('div');
+        subtitle.className = 'card-subtitle';
+        const parts = [];
+        if (product.color) parts.push(product.color);
+        if (product.memory) parts.push(product.memory + ' GB');
+        if (product.code) parts.push('#' + product.code);
+        subtitle.textContent = parts.join(' • ');
+
+        card.appendChild(img);
+        card.appendChild(title);
+        card.appendChild(subtitle);
+
+        // описание
+        if (product.description) {
+          const desc = document.createElement('div');
+          desc.className = 'card-desc';
+          desc.textContent = product.description;
+          card.appendChild(desc);
+        }
+
+        // мета: категория + наличие
+        const meta = document.createElement('div');
+        meta.className = 'card-meta';
+
+        if (product.category) {
+          const b1 = document.createElement('span');
+          b1.className = 'badge';
+          b1.textContent = product.category;
+          meta.appendChild(b1);
+        }
+
+        const stockBadge = document.createElement('span');
+        stockBadge.className = 'badge';
+        if (!product.isAvailable) {
+          stockBadge.classList.add('badge-out');
+          stockBadge.textContent = 'Нет в наличии';
+        } else {
+          stockBadge.textContent = product.stock ? `В наличии: ${product.stock}` : 'В наличии';
+        }
+        meta.appendChild(stockBadge);
+
+        card.appendChild(meta);
+
+        // низ: цена + кнопка
+        const bottom = document.createElement('div');
+        bottom.className = 'card-bottom';
+
+        const priceWrap = document.createElement('div');
+        priceWrap.className = 'price-wrap';
+
+        const price = document.createElement('span');
+        price.className = 'price';
+        price.textContent = formatPrice(product.price);
+        priceWrap.appendChild(price);
+
+        const btn = document.createElement('button');
+        btn.className = 'btn';
+        btn.textContent = product.isAvailable ? 'В корзину' : 'Нет в наличии';
+        btn.disabled = !product.isAvailable;
+
+        btn.addEventListener('click', () => {
+          if (!product.isAvailable) return;
+          addToCart(product);
+        });
+
+        bottom.appendChild(priceWrap);
+        bottom.appendChild(btn);
+
+        card.appendChild(bottom);
+
+        catalogEl.appendChild(card);
+      });
+    }
+
+    function addToCart(product) {
+      const key = product.code || product.model;
+      const item = state.cart[key] || { product, qty: 0 };
+      item.qty += 1;
+      state.cart[key] = item;
+      updateCartView();
+      if (tg && tg.HapticFeedback) tg.HapticFeedback.impactOccurred('light');
+    }
+
+    function calcCartTotals() {
+      let totalQty = 0;
+      let totalSum = 0;
+
+      Object.values(state.cart).forEach(item => {
+        totalQty += item.qty;
+        totalSum += item.qty * item.product.price;
+      });
+
+      return { totalQty, totalSum };
+    }
+
+    function updateCartView() {
+      const { totalQty, totalSum } = calcCartTotals();
+
+      if (totalQty === 0) {
+        cartBar.style.display = 'none';
+        if (tg) tg.MainButton.hide();
+        return;
+      }
+
+      cartBar.style.display = 'flex';
+      cartTitle.textContent = `В корзине: ${totalQty} шт.`;
+      cartSubtitle.textContent = 'Проверьте состав заказа и отправьте его в чат.';
+      cartTotal.textContent = formatPrice(totalSum);
+      cartCount.textContent = `(${totalQty} шт.)`;
+
+      if (tg) {
+        tg.MainButton.setText('Отправить заказ');
+        tg.MainButton.show();
+      }
+    }
+
+    function buildOrderPayload() {
+      const items = Object.values(state.cart).map(item => ({
+        code: item.product.code,
+        category: item.product.category,
+        model: item.product.model,
+        color: item.product.color,
+        memory: item.product.memory,
+        qty: item.qty,
+        price: item.product.price,
+        sum: item.qty * item.product.price
+      }));
+
+      const { totalQty, totalSum } = calcCartTotals();
+
+      return {
+        type: 'cart_order',
+        items,
+        totalQty,
+        totalSum,
+        currency: 'RUB',
+        createdAt: new Date().toISOString()
+      };
+    }
+
+    function sendOrder() {
+      const payload = buildOrderPayload();
+      const json = JSON.stringify(payload);
+
+      if (tg) {
+        tg.sendData(json);
+        tg.close();
+      } else {
+        alert('TG WebApp SDK недоступен. Заказ: ' + json);
+      }
+    }
+
+    searchInput.addEventListener('input', renderCatalog);
+    sendOrderBtn.addEventListener('click', sendOrder);
+
+    if (tg) {
+      tg.onEvent('mainButtonClicked', sendOrder);
+    }
+
+    // Загружаем всегда свежие данные при открытии
+    loadProductsFromSheet();
+  </script>
+</body>
+</html>
